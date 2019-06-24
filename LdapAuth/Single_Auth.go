@@ -7,8 +7,8 @@ import (
 	"github.com/shanghai-edu/ldap-test-tool/models"
 )
 
-func init() {
-	g.ParseConfig("cfg.json")
+func ParseConfig(cfg string) {
+	g.ParseConfig(cfg)
 }
 
 func Single_Auth(username string, password string) {
