@@ -11,15 +11,15 @@ func ParseConfig(cfg string) {
 	g.ParseConfig(cfg)
 }
 
-func Single_Auth(username string, password string) {
+func Single_Auth(username string, password string) (bool, error) {
 
 	_, err := models.Single_Auth(g.Config().Ldap, username, password)
 
 	if err != nil {
 		fmt.Printf("%s auth failed: %s \n", username, err.Error())
 
-		return
+		return false, err
 	}
 	fmt.Printf("%s auth successed \n", username)
-
+	return true, err
 }
