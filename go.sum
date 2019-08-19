@@ -57,6 +57,7 @@ github.com/lib/pq v1.0.0/go.mod h1:5WUZQaWbwv1U+lTReE5YruASi9Al49XbQIvNi/34Woo=
 github.com/lithammer/fuzzysearch v1.0.1 h1:RNvSSAzPP28AdaNh0wGnhCv59QZOhJ24lcImu1MiAP0=
 github.com/lithammer/fuzzysearch v1.0.1/go.mod h1:bvAJyokfCQ7Vknrd4Kgc+izmMrPj5CiBAu2t6rK1Kak=
 github.com/lithammer/fuzzysearch v1.0.2 h1:AjCE2iwc5y+8K+h2nXVc0Pmrpjvu+JVqMgiZ0oakXDM=
+github.com/lithammer/fuzzysearch v1.0.2/go.mod h1:bvAJyokfCQ7Vknrd4Kgc+izmMrPj5CiBAu2t6rK1Kak=
 github.com/magiconair/properties v1.8.0/go.mod h1:PppfXfuXeibc/6YijjN8zIbojt8czPbwD3XqdrwzmxQ=
 github.com/maruel/natural v0.0.0-20180416170133-dbcb3e2e8cf1 h1:PEhRT94KBTY4E0KdCYmhvDGWjSFBxc68j2M6PMRix8U=
 github.com/maruel/natural v0.0.0-20180416170133-dbcb3e2e8cf1/go.mod h1:wI697HNhDFM/vBruYM3ckbszQ2+DOIeH9qdBKMdf288=
