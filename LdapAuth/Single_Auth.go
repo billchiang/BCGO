@@ -3,12 +3,12 @@ package LdapAuth
 import (
 	"fmt"
 
-	"github.com/shanghai-edu/ldap-test-tool/g"
-	"github.com/shanghai-edu/ldap-test-tool/models"
+	"github.com/billchiang/ldap-test-tool/g"
+	"github.com/billchiang/ldap-test-tool/models"
 )
 
 func ParseConfig(cfg string) {
-	g.ParseConfig(cfg)
+	g.ParseConfigJson(cfg)
 }
 
 func Single_Auth(username string, password string) (bool, error) {
