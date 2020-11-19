@@ -2,7 +2,7 @@ module github.com/billchiang/BCGO
 
 require (
 	github.com/dgraph-io/dgo v0.0.0-20190809190327-8c33afc79492
-	github.com/graphql-go/graphql v0.7.8
+	github.com/graphql-go/graphql v0.7.9
 	github.com/maruel/natural v0.0.0-20180416170133-dbcb3e2e8cf1
 	github.com/pkg/errors v0.8.1 // indirect
 	github.com/shanghai-edu/ldap-test-tool v0.0.0-20180703055334-9a6be2cec9a0
