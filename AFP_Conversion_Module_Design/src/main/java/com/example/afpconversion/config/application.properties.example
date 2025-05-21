@@ -1,0 +1,40 @@
+# AFP Conversion Module Configuration Example
+
+# Path to the external conversion tool executable (if using CLI integration)
+afp.conversion.tool.executable.path=/opt/afp-converter/bin/convert
+
+# Path to the license file or license server for the conversion tool (if applicable)
+# afp.conversion.tool.license.key=YOUR_LICENSE_KEY
+# afp.conversion.tool.license.server=licenses.example.com:1234
+
+# Paths to AFP resource directories
+# These are crucial for the conversion tool to resolve external AFP resources like fonts, overlays, and page segments.
+afp.resources.font.path=/mnt/afp_resources/fonts/
+afp.resources.overlay.path=/mnt/afp_resources/overlays/
+afp.resources.pseg.path=/mnt/afp_resources/psegments/
+afp.resources.formdef.path=/mnt/afp_resources/formdefs/ # Path to form definitions
+
+# Temporary storage path for intermediate files during conversion
+afp.conversion.temp.storage.path=/tmp/afp_conversion_work/
+
+# Default output settings (examples, actual settings depend on the tool)
+# For PDF/A conversion
+afp.conversion.pdfa.default.compliance.level=PDF/A-2b # e.g., PDF/A-1b, PDF/A-2b, PDF/A-3u
+afp.conversion.pdfa.default.icc.profile.path=/opt/color_profiles/sRGB_IEC61966-2-1_black_scaled.icc
+
+# For PCL conversion
+afp.conversion.pcl.default.type=PCL5 # e.g., PCL5, PCL6, PCLXL
+
+# OCR settings (if OCR is part of the conversion workflow, e.g., for image-only AFPs)
+# afp.conversion.ocr.enabled=false
+# afp.conversion.ocr.language=eng
+
+# Logging level for the conversion service
+# logging.level.com.example.afpconversion=INFO
+
+# --- SDK Specific Configuration (if using an SDK instead of CLI) ---
+# Example:
+# afp.conversion.sdk.config.file=/opt/afp-converter-sdk/config/sdk_settings.xml
+# afp.conversion.sdk.username=sdk_user
+# afp.conversion.sdk.password=sdk_password
+# afp.conversion.sdk.endpoint=http://localhost:8080/sdk_service (if SDK connects to a service)
