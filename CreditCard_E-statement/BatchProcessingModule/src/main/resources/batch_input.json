@@ -1,0 +1,5 @@
+[
+  { "customerId": "CUST001", "name": "Alice Wonderland", "statementDate": "2024-03-10", "email": "alice@example.com", "items": [{"item": "Mad Hatter Tea Party", "amount": "25.00"}]},
+  { "customerId": "CUST002", "name": "Bob The Builder", "statementDate": "2024-03-11", "email": "bob@example.com", "items": [{"item": "Toolkit", "amount": "150.75"}]},
+  { "customerId": "CUST003", "name": "Charlie Brown", "statementDate": "2024-03-12", "email": "charlie@example.com", "items": [{"item": "Football", "amount": "15.25"}]}
+]

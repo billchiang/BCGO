@@ -1,0 +1,17 @@
+<root xmlns="http://www.w3.org/1999/XSL/Format" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
+  <layout-master-set>
+    <simple-page-master master-name="A4">
+      <region-body margin="25mm"/>
+    </simple-page-master>
+  </layout-master-set>
+  <page-sequence master-reference="A4">
+    <flow flow-name="xsl-region-body">
+      <block font-size="12pt" font-family="sans-serif">
+        Hello, <fo:inline xmlns:fo="http://www.w3.org/1999/XSL/Format"><xsl:value-of select="/data/name" xmlns:xsl="http://www.w3.org/1999/XSL/Transform"/></fo:inline>!
+      </block>
+      <block font-size="12pt" font-family="sans-serif">
+        Your statement date is <fo:inline xmlns:fo="http://www.w3.org/1999/XSL/Format"><xsl:value-of select="/data/statementDate" xmlns:xsl="http://www.w3.org/1999/XSL/Transform"/></fo:inline>.
+      </block>
+    </flow>
+  </page-sequence>
+</root>
