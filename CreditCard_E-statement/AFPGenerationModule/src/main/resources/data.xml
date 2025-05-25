@@ -1,4 +1,66 @@
-<data>
-  <name>John Doe</name>
-  <statementDate>2024-01-15</statementDate>
-</data>
+<statementData>
+  <accountDetails>
+    <bankName>Global Trust Bank</bankName>
+    <accountNumber>ACC-1234567890</accountNumber>
+  </accountDetails>
+  <statementDetails>
+    <statementDate>2024-07-28</statementDate>
+    <paymentDueDate>2024-08-15</paymentDueDate>
+    <totalAmountDue>USD 543.21</totalAmountDue>
+  </statementDetails>
+  <customer>
+    <name>Alice Wonderland</name>
+    <address>
+      <street>123 Rabbit Hole Lane</street>
+      <city>Curiosity Creek</city>
+      <state>Wonderland State</state>
+      <zipCode>12345</zipCode>
+    </address>
+  </customer>
+  <banner>
+    <imageUrl>http://example.com/images/bank_banner.png</imageUrl>
+    <altText>Global Trust Bank - Your Trusted Partner</altText>
+  </banner>
+  <summary>
+    <previousBalance>USD 200.00</previousBalance>
+    <paymentsReceived>USD 100.00</paymentsReceived>
+    <newCharges>USD 443.21</newCharges>
+    <newBalance>USD 543.21</newBalance>
+  </summary>
+  <transactions>
+    <transaction>
+      <date>2024-07-01</date>
+      <description>Mad Hatter Tea Party Supplies</description>
+      <amount>USD 25.50</amount>
+    </transaction>
+    <transaction>
+      <date>2024-07-05</date>
+      <description>Cheshire Cat Food Co.</description>
+      <amount>USD 15.75</amount>
+    </transaction>
+    <transaction>
+      <date>2024-07-12</date>
+      <description>Queen of Hearts Croquet Set</description>
+      <amount>USD 75.00</amount>
+    </transaction>
+    <transaction>
+      <date>2024-07-20</date>
+      <description>White Rabbit Pocket Watch Repair</description>
+      <amount>USD 327.00</amount>
+    </transaction>
+     <transaction>
+      <date>2024-07-20</date>
+      <description>Refund: Overcharged Pocket Watch Repair</description>
+      <amount>USD -27.00</amount>
+    </transaction>
+  </transactions>
+  <notices>
+    <noticeText>Important: Please review your transactions carefully. Contact us within 30 days for any discrepancies. New interest rates apply from next month.</noticeText>
+  </notices>
+  <paymentSlip>
+    <barcodeData>ACC1234567890DUE20240815AMT54321</barcodeData>
+  </paymentSlip>
+  <termsAndConditions>
+    <footerText>For terms and conditions, please visit www.globaltrustbank.example.com/terms. Your continued use of this account signifies acceptance of these terms.</footerText>
+  </termsAndConditions>
+</statementData>
