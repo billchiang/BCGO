@@ -333,4 +333,330 @@ This document outlines the extension to a multi-channel electronic communication
 
 The document explains how these new capabilities integrate with the existing AFP and email functionalities, primarily through the `DispatchService` which can now orchestrate communications across a wider range of channels.
 
-I will now submit the report for this subtask.
+---
+## 正體中文 (Traditional Chinese)
+
+# 將系統擴展為電子通訊平台 - 設計文件
+
+## 1. 通用通訊概念
+
+*   **通用「通訊工作」結構：**
+    為支援多頻道通訊，需要一個通用的「通訊工作」或「訊息」抽象概念。此結構將在內部用於表示任何傳出通訊，無論頻道為何。
+
+    **`CommunicationJob` 屬性：**
+    ```json
+    {
+      "job_id": "unique_job_identifier", // 由系統產生
+      "correlation_id": "client_provided_correlation_id", // 選用，供用戶端追蹤
+      "customer_id": "unique_customer_identifier", // 連結到客戶設定檔/偏好設定
+      "communication_type": "NOTICE_OF_SERVICE_OUTAGE", // 業務定義的類型，例如 "INVOICE_NOTIFICATION"、"PASSWORD_RESET"、"MARKETING_PROMO"
+      "priority": "normal", // "high"、"normal"、"low"
+      "requested_channels": ["email", "sms"], // 選用：用戶端可以建議偏好頻道
+      "channel_constraints": { // 選用：頻道的特定限制
+        "sms": {
+          "require_delivery_receipt": true
+        }
+      },
+      "recipient_details_override": { // 選用：如果提供，則覆寫此工作的已儲存客戶聯絡詳細資料
+        "email_address": "override_recipient@example.com",
+        "phone_number": "+15551234567", // SMS 的 E.164 格式
+        "app_push_token": "device_token_for_push"
+      },
+      "payload_data": { // 用於個人化範本的資料
+        "customer_name": "John Doe",
+        "invoice_number": "INV12345",
+        "invoice_amount": "USD 100.00",
+        "invoice_due_date": "2025-02-15",
+        "service_name": "Premium Subscription",
+        "outage_start_time": "2025-01-20T14:00:00Z",
+        "outage_end_time": "2025-01-20T16:00:00Z"
+        // ... 其他相關資料點
+      },
+      "template_references": { // 特定頻道的範本識別碼
+        "email": "template_email_service_outage_v1",
+        "sms": "template_sms_service_outage_v1",
+        "app_push": "template_push_service_outage_v1"
+      },
+      "metadata": { // 用於記錄或路由的任何其他中繼資料
+        "source_system": "BillingSystem",
+        "batch_id": "optional_batch_identifier"
+      },
+      "schedule_at": "2025-01-20T13:00:00Z", // 選用：如果工作需要在特定時間傳送
+      "status": "PendingDispatch", // 內部狀態：例如 PendingDispatch、Dispatched、ProcessedByChannel、FailedDispatch
+      "created_at": "2025-01-15T12:00:00Z"
+    }
+    ```
+    *   **`job_id`**：用於追蹤整個通訊請求的唯一識別碼。
+    *   **`customer_id`**：擷取客戶偏好設定和聯絡詳細資料的金鑰。
+    *   **`communication_type`**：訊息的語意類型，可用於路由、優先順序設定和範本選擇規則。
+    *   **`requested_channels`**：允許起始系統建議頻道，但最終決定將由分派服務根據偏好設定做出。
+    *   **`recipient_details_override`**：用於使用臨時聯絡詳細資料而非已儲存詳細資料的情況。
+    *   **`payload_data`**：要與範本合併的實際內容變數。
+    *   **`template_references`**：每個潛在頻道的特定範本 ID。這允許針對每個頻道最佳化不同的訊息結構。
+
+## 2. 新寄件者微服務設計
+
+這些服務的架構將類似於 `EmailSenderService`，專注於單一頻道。
+
+### a. SMSSenderService
+
+*   **架構：**
+    *   一個微服務，負責透過一個或多個 SMS 閘道供應商傳送 SMS 訊息。
+    *   它將透過內部 API 或專用訊息佇列接受「傳送 SMS」請求 (由 `DispatchService` 從 `CommunicationJob` 衍生)。
+    *   它將管理與所選 SMS 閘道之間的互動。
+*   **與 SMS 閘道整合：**
+    *   **主要閘道建議：Twilio API** (假設這是常見選擇)。其他閘道如 Vonage (Nexmo)、Sinch 或本地供應商可以類似方式整合。
+    *   該服務將使用閘道的 REST API 傳送訊息。
+    *   API 憑證 (帳戶 SID、驗證權杖、寄件者 ID/電話號碼) 將安全儲存和設定。
+    *   抽象化閘道互動，以允許未來可能切換或新增閘道 (配接器模式)。
+*   **主要功能：**
+    *   **傳送 SMS：**
+        *   接收收件人電話號碼 (E.164 格式)、訊息內容 (來自範本) 和寄件者 ID。
+        *   對 SMS 閘道進行 API 呼叫。
+        *   處理 API 回應 (成功、失敗、由閘道排隊)。
+    *   **狀態處理：**
+        *   從閘道 API 呼叫接收同步狀態。
+        *   透過閘道提供的 webhook 接收非同步狀態更新 (例如「已傳送」、「已送達」、「失敗」、「未送達」)。這需要 `SMSSenderService` 公開一個閘道可以呼叫的 webhook 端點。
+        *   在專用資料庫資料表中更新 SMS 的狀態，並連結回原始 `CommunicationJob` 的 `job_id` 或子任務 ID。
+    *   **範本處理 (純文字)：**
+        *   SMS 範本主要為純文字訊息，可能包含 `payload_data` 的預留位置。
+        *   該服務將在文字範本中執行基本的變數替換。
+        *   範例 SMS 範本：`親愛的 {{customer_name}}，您的發票 {{invoice_number}} 金額為 {{invoice_amount}}，到期日為 {{invoice_due_date}}。查看：{{short_url}}`
+    *   **短網址整合 (選用)：** 為了在 SMS 中包含連結 (有字元限制)，可與 URL 縮短服務整合。
+    *   **字元編碼與串接：** 處理訊息長度限制、字元編碼 (GSM-7、UCS-2) 以及如果支援/設定，則處理較長文字的訊息串接。
+    *   **記錄：** 請求、閘道互動和狀態更新的詳細記錄。
+
+### b. AppPushService
+
+*   **架構：**
+    *   一個用於向行動應用程式傳送推播通知的微服務。
+    *   它將透過內部 API 或訊息佇列接受「傳送推播通知」請求 (衍生自 `CommunicationJob`)。
+    *   它將管理與 Firebase Cloud Messaging (FCM) (適用於 Android) 和 Apple Push Notification service (APNs) (適用於 iOS) 的互動。
+*   **與 FCM/APNs 整合：**
+    *   **FCM (Firebase Cloud Messaging)：**
+        *   使用 Firebase Admin SDK (Java、Python、Node.js、Go、C#) 或 FCM HTTP v1 API。
+        *   需要伺服器金鑰/憑證才能向 FCM 進行驗證。
+    *   **APNs (Apple Push Notification service)：**
+        *   使用 APNs 函式庫 (例如基於 HTTP/2 通訊協定)。
+        *   需要 Apple 推播通知金鑰 (.p8 檔案) 或憑證 (.p12)。
+    *   該服務將需要安全地儲存和管理這些特定於平台的憑證。
+    *   它將需要處理特定於平台的負載結構。
+*   **主要功能：**
+    *   **傳送推播通知：**
+        *   接收收件人裝置權杖、平台 (Android/iOS)、訊息內容 (標題、內文、來自範本的自訂資料)。
+        *   為 FCM 或 APNs 建構適當的負載。
+        *   對各自的推播通知服務進行 API 呼叫。
+        *   處理 API 回應 (成功、失敗、無效權杖)。
+    *   **狀態處理：**
+        *   從 FCM/APNs API 呼叫接收同步狀態。
+        *   FCM 透過 FCM API 或 Firebase 主控台提供一些傳送狀態。
+        *   APNs 提供有限的回饋 (例如，如果權杖無效)。真正的「已送達」狀態並非總是能像 SMS 那樣直接從 APNs 取得。
+        *   在資料庫中更新狀態，並連結到 `CommunicationJob`。
+        *   處理權杖生命週期管理 (例如，來自 FCM/APNs 關於無效或未註冊權杖的回饋應觸發 `CustomerProfileService` 中的更新，以移除或標記這些權杖)。
+    *   **範本處理 (結構化內容)：**
+        *   推播通知範本可以更結構化 (標題、內文、圖片 URL、深層連結 URL、自訂鍵值對)。
+        *   範本將使用 `payload_data` 的預留位置定義這些欄位。
+        *   範例推播範本 (類 JSON 結構)：
+            ```json
+            {
+              "title": "發票到期：{{invoice_number}}",
+              "body": "嗨 {{customer_name}}，您的發票金額為 {{invoice_amount}}，到期日為 {{invoice_due_date}}。",
+              "image_url": "{{company_logo_url}}", // 選用
+              "deep_link": "myapp://invoices/{{invoice_id}}",
+              "custom_data": {
+                "invoice_id": "{{invoice_id}}",
+                "category": "billing"
+              }
+            }
+            ```
+    *   **記錄：** 請求、平台互動和狀態更新的詳細記錄。
+
+## 3. 客戶偏好設定管理
+
+*   **服務名稱：** `CustomerProfileService` (如果僅專注於偏好設定，則為 `PreferenceService`)。假設為 `CustomerProfileService`，因為它可能包含其他設定檔資訊。
+*   **資料模型 (概念性 - 例如 NoSQL 如 MongoDB 或關聯式)：**
+    *   **`CustomerProfile` 集合/資料表：**
+        *   `customer_id`：字串 (主鍵)
+        *   `contact_details`：物件陣列
+            *   `channel`：字串 ("email"、"sms"、"app_push"、"voice"、"whatsapp")
+            *   `address`：字串 (例如電子郵件地址、E.164 格式的電話號碼、裝置權杖)
+            *   `verified`：布林值
+            *   `primary`：布林值 (此頻道的主要聯絡方式)
+            *   `added_at`：時間戳記
+            *   `last_verified_at`：時間戳記 (如果存在驗證程序)
+        *   `communication_preferences`：物件陣列
+            *   `communication_type`：字串 (例如 "INVOICE_NOTIFICATION"、"MARKETING_PROMO"、"SERVICE_UPDATES")
+            *   `allowed_channels`：字串陣列 (例如 ["email", "app_push"]) - 客戶*允許*用於此類型的頻道。
+            *   `preferred_channel`：字串 (例如 "email") - 如果允許多個頻道，則為客戶的首選。
+            *   `opt_in_status`：布林值 (如果選擇加入此類型則為 true，否則為 false)
+            *   `opt_in_source`：字串 (例如 "WebAppSignup"、"SupportCall")
+            *   `opt_in_timestamp`：時間戳記
+            *   `last_updated_timestamp`：時間戳記
+        *   `global_unsubscribe_all`：布林值 (主要選擇退出所有非交易性通訊)
+        *   `consent_records`：物件陣列 (用於 GDPR/PDPA)
+            *   `consent_type`：字串 (例如 "marketing_emails"、"product_update_sms")
+            *   `granted`：布林值
+            *   `timestamp`：時間戳記
+            *   `source`：字串 (例如 "PreferenceCenterWebApp"、"InitialSignupForm")
+            *   `consent_document_version`：字串 (客戶同意的隱私權政策/條款版本)
+        *   `created_at`：時間戳記
+        *   `updated_at`：時間戳記
+*   **API：**
+    *   `POST /customers`：建立新的客戶設定檔。
+    *   `GET /customers/{customer_id}`：擷取客戶的完整設定檔 (聯絡詳細資料、偏好設定、同意)。
+    *   `PUT /customers/{customer_id}`：更新整體客戶設定檔資訊。
+    *   `POST /customers/{customer_id}/contact_details`：新增聯絡詳細資料 (電子郵件、電話、裝置權杖)。
+        *   可能會觸發驗證流程 (例如傳送 OTP 到電話、驗證電子郵件)。
+    *   `PUT /customers/{customer_id}/contact_details/{contact_id}`：更新特定的聯絡詳細資料 (例如標記為已驗證、設定為主要)。
+    *   `DELETE /customers/{customer_id}/contact_details/{contact_id}`：移除聯絡詳細資料。
+    *   `GET /customers/{customer_id}/preferences`：擷取通訊偏好設定。
+    *   `PUT /customers/{customer_id}/preferences`：更新通訊偏好設定 (例如針對不同的 `communication_type` 設定允許/偏好的頻道、選擇加入/退出)。
+    *   `GET /customers/{customer_id}/consent`：擷取同意記錄。
+    *   `POST /customers/{customer_id}/consent`：記錄新的同意狀態。
+*   **整合：**
+    *   `DispatchService` 將查詢此服務以取得客戶偏好設定和有效的聯絡詳細資料。
+    *   當推播權杖失效時，`AppPushService` 將需要更新此服務。
+
+## 4. 頻道選擇與分派邏輯
+
+*   **服務名稱：** `DispatchService` (或者此邏輯可以是現有 `BatchOrchestrationService` 的核心部分或新的 `CommunicationOrchestrator`)。為清楚起見，我們將其定義為一個獨立的邏輯元件 `DispatchService`。
+*   **職責：**
+    *   接受 `CommunicationJob`。
+    *   使用來自 `CustomerProfileService` 的客戶偏好設定和聯絡詳細資料來充實工作。
+    *   套用規則和頻道可用性以選擇最合適的頻道。
+    *   將通用的 `CommunicationJob` 轉換為特定於頻道的請求。
+    *   透過其佇列或 API 將這些請求分派到各自的寄件者微服務 (EmailSender、SMSSender、AppPushService)。
+*   **頻道選擇的詳細邏輯：**
+    1.  **接收 `CommunicationJob`：**
+    2.  **擷取客戶設定檔：** 使用 `customer_id` 查詢 `CustomerProfileService`。
+        *   如果找不到設定檔，或沒有有效的聯絡詳細資料，工作可能會失敗或進入例外佇列。
+    3.  **檢查全域取消訂閱：** 如果 `global_unsubscribe_all` 為 true 且 `communication_type` 為非交易性 (例如 "MARKETING_PROMO")，則封鎖在所有頻道 (如果有) 上的傳送，但必要頻道除外。
+    4.  **依 `communication_type` 偏好設定篩選：**
+        *   尋找工作的 `communication_type` 的偏好設定。
+        *   如果客戶已明確選擇退出 (`opt_in_status` 為 false) 此 `communication_type`，則封鎖傳送，除非是法律強制要求的交易訊息 (需要明確定義哪些類型是強制性的)。
+        *   取得此 `communication_type` 的 `allowed_channels` 清單和 `preferred_channel`。
+    5.  **考量 `requested_channels` (來自工作)：** 如果工作指定了 `requested_channels`，這些可以用作提示，但客戶偏好設定優先。
+    6.  **頻道可用性與有效性：**
+        *   對於每個潛在頻道 (衍生自允許/偏好)：
+            *   檢查客戶設定檔中是否存在該頻道的有效且已驗證的聯絡地址/權杖 (或已在 `recipient_details_override` 中提供)。
+            *   檢查是否在 `template_references` 中定義了特定於頻道的範本。
+            *   (未來) 檢查即時頻道狀態 (例如，如果 SMS 閘道關閉，此頻道暫時不可用)。
+    7.  **優先順序設定與選擇 (範例邏輯)：**
+        *   **規則 1：明確的客戶偏好設定：** 如果為 `communication_type` 設定了 `preferred_channel`，並且該頻道有效且可用，則選擇它。
+        *   **規則 2：用戶端請求的頻道：** 如果沒有明確的客戶偏好設定，則考量來自 `CommunicationJob.requested_channels` 且同時在客戶的 `allowed_channels` 中且有效/可用的頻道。
+        *   **規則 3：預設頻道順序 (可設定)：** 如果沒有特定的偏好設定或請求，則為此 `communication_type` 使用系統定義的預設頻道順序 (例如 AppPush > Email > SMS)，選擇第一個允許、有效且可用的頻道。
+        *   **規則 4：強制性通訊：** 對於某些關鍵的 `communication_type` (例如 "SECURITY_ALERT"、"LEGAL_NOTICE")，系統可能會覆寫某些偏好設定，以確保透過至少一個可靠的頻道 (例如電子郵件) 傳送。這需要仔細的法律和業務定義。
+    8.  **後備策略：**
+        *   如果在分派期間主要選擇的頻道同步失敗 (例如，`SMSSenderService` 在嘗試閘道之前立即回報無效號碼)，`DispatchService` *可以*嘗試後備。
+        *   範例：如果偏好的 AppPush 因分派時權杖無效而失敗，則如果允許且可用，則後備到電子郵件。
+        *   非同步失敗 (例如幾小時後 SMS 硬退信) 的後備更複雜，通常由頻道寄件者內的重試邏輯處理，或根據退信為不同頻道觸發新的 `CommunicationJob`。
+    9.  **準備特定於頻道的請求：**
+        *   對於所選頻道，從 `template_references` 中擷取相關的範本 ID。
+        *   為寄件者服務建立特定的負載 (例如，對於 SMS，僅為電話號碼和文字內容；對於電子郵件，則為完整結構)。
+    10. **分派：** 將請求傳送到適當寄件者服務的佇列或 API。
+*   **整合：**
+    *   從 API 端點 (用於單一請求) 或從 `BatchOrchestrationService` (用於批次工作) 接收工作。
+    *   查詢 `CustomerProfileService`。
+    *   向 `EmailSenderService`、`SMSSenderService`、`AppPushService` 傳送訊息。
+
+## 5. 範本管理增強功能
+
+*   **`TemplateManagementService` 修改：**
+    *   現有的 `TemplateManagementService` (專為 AFP/電子郵件設計) 需要通用化。
+    *   **資料模型擴充：**
+        *   `Template` 實體應包含 `channel_type` 屬性 (例如 "email"、"sms"、"app_push"、"afp")。
+        *   `content` 欄位可能需要根據 `channel_type` 儲存不同的結構：
+            *   電子郵件：HTML 內容、純文字內容、主旨。
+            *   SMS：文字內容字串。
+            *   App Push：用於標題、內文、資料負載、深層連結的 JSON 結構。
+            *   AFP：對 AFP 設計檔案的參考 (如最初規劃)。
+        *   或者，可以有單獨的內容欄位，如 `html_content`、`text_content`、`json_payload_structure`。
+    *   **API：**
+        *   用於建立/管理範本的現有 API 應接受 `channel_type`。
+        *   `GET /templates/{template_id}` 的回應將傳回適合其 `channel_type` 的內容結構。
+*   **視覺化範本產生器考量：**
+    *   **電子郵件：** 現有的電子郵件視覺化產生器 (如果基於 HTML) 大致可以保持不變。
+    *   **SMS：**
+        *   更簡單的文字編輯器介面。
+        *   預留位置支援 `{{variable}}`。
+        *   字元計數顯示，多部分訊息警告。
+        *   SMS 外觀預覽。
+    *   **App Push：**
+        *   標題、內文欄位。
+        *   新增自訂鍵值資料對的介面。
+        *   圖片 URL、深層連結 URL 欄位。
+        *   不同裝置作業系統 (iOS、Android) 的預覽。
+    *   **AFP：** 現有的基於 XSL-FO 或視覺化的 AFP 設計器。
+    *   產生器需要輸出範本內容的 JSON 表示法，以便 `TemplateManagementService` 可以儲存，且各自的寄件者服務可以解譯。對於 SMS 和 AppPush，此 JSON 可能比 AFP 的 XSL-FO 或電子郵件的 HTML 更簡單。
+
+## 6. 隱私權合規策略 (GDPR/PDPA)
+
+*   **同意管理：**
+    *   `CustomerProfileService` 是管理同意的核心。
+    *   每個 `communication_type` 以及該類型中每個頻道的明確 `opt_in_status`。
+    *   所有同意變更的時間戳記和來源。
+    *   能夠區分行銷通訊與交易性通訊的同意。
+*   **資料主體權利：**
+    *   **存取：** `CustomerProfileService` 上的 API (`GET /customers/{customer_id}`) 允許擷取所有已儲存的聯絡詳細資料、偏好設定和同意記錄。
+    *   **修正：** `CustomerProfileService` 上的 `PUT` API 允許客戶更新其聯絡詳細資料和偏好設定。
+    *   **清除 (「被遺忘權」)：**
+        *   需要定義處理清除請求的程序。這包括：
+            *   在 `CustomerProfileService` 中刪除客戶設定檔或對其進行匿名化處理。
+            *   將清除請求傳播到持有客戶資料的其他服務 (例如，在特定期間後從日誌中移除 PII，但可以保留彙總/匿名的營運指標)。
+            *   這很複雜，需要在所有微服務中仔細規劃。
+*   **稽核追蹤：**
+    *   在 `CustomerProfileService` 中記錄客戶偏好設定和同意狀態的所有變更。
+    *   記錄所有通訊分派決策和結果，並連結回 `CommunicationJob` 和 `customer_id`。這允許證明傳送了什麼、何時傳送以及基於何種同意基礎。
+    *   `BatchOrchestrationService` 也應維護批次工作執行的稽核日誌。
+*   **資料最小化：** 僅收集和儲存為定義的通訊目的所必需的客戶聯絡詳細資料和偏好設定。
+*   **安全儲存：** 所有 PII (聯絡詳細資料、權杖) 都必須安全儲存，並在靜態和傳輸中加密。
+
+## 7. 對現有 API 的影響與新的 API 需求
+
+*   **對先前設計的外部 API 的影響 (來自 `RESTful_APIs_External_Integration_Design.md`)：**
+    *   **`GET /statements/{statement_id}/status`**：
+        *   `status` 欄位可能需要更細微的值以反映多頻道分派程序 (例如 "Pending_Dispatch"、"Dispatched_To_SMS"、"Delivered_To_Push_Device")。
+        *   `details` 欄位可以指示使用的頻道。
+    *   **`GET /emails/{email_id}/status`**：此端點變得更具體。如果系統現在處理多個頻道，則可能需要一個更通用的端點，或者此端點仍專門用於通訊工作的電子郵件頻道部分。也許可以重新命名為 `GET /communication_attempts/{attempt_id}/status`，其中 attempt 是特定於頻道的。目前，假設 `email_id` 是指更廣泛的 `CommunicationJob` 中的電子郵件嘗試。
+    *   **`POST /statements/{statement_id}/resend_email`**：應通用化為 `POST /communication_jobs/{job_id}/resend` 或 `POST /statements/{statement_id}/resend_communication`。
+        *   請求內文可以指定要在哪個頻道上重新傳送，或者讓 `DispatchService` 重新評估。
+        ```json
+        // POST /communication_jobs/{job_id}/resend
+        {
+          "channel_override": "sms", // 選用：強制使用特定頻道
+          "recipient_details_override": { ... } // 選用
+        }
+        ```
+    *   **`POST /statements/reissue`**：此 API 用於從 AFP 產生開始的完整重新處理。其核心功能保持不變，但後續的交付現在將透過新的多頻道 `DispatchService`。與交付相關的狀態更新將更加豐富。
+*   **新的 API 需求 (外部，透過 API 閘道)：**
+    *   **提交通用通訊工作：**
+        *   `POST /communication_jobs`
+        *   **描述：** 向平台提交新的通訊工作，允許系統根據客戶偏好設定和規則決定最佳頻道。
+        *   **請求內文結構描述：** 類似於第 1 節中定義的 `CommunicationJob` 結構 (不包括內部狀態欄位)。
+            ```json
+            {
+              "correlation_id": "client_corr_id_001",
+              "customer_id": "cust_789",
+              "communication_type": "APPOINTMENT_REMINDER",
+              "requested_channels": ["sms", "email"], // 選用提示
+              "payload_data": { "customer_name": "Jane Roe", "appointment_time": "2025-02-10T15:00:00Z" },
+              "template_references": {
+                "sms": "sms_appt_reminder_v1",
+                "email": "email_appt_reminder_v1"
+              },
+              "schedule_at": "2025-02-09T10:00:00Z" // 選用
+            }
+            ```
+        *   **成功回應：** `202 Accepted` 與 `{ "job_id": "new_job_id_xyz" }`。
+    *   **管理客戶偏好設定 (外部公開的 `CustomerProfileService` API 的子集)：**
+        *   `GET /profiles/me/preferences`：(假設 "me" 透過用戶端的 OAuth 權杖解析為 `customer_id`) 擷取已驗證客戶的偏好設定。
+        *   `PUT /profiles/me/preferences`：更新已驗證客戶的偏好設定。
+        *   `GET /profiles/me/contact_details`：擷取聯絡詳細資料。
+        *   `POST /profiles/me/contact_details`：新增聯絡詳細資料。
+        *   `PUT /profiles/me/contact_details/{contact_id}`：更新聯絡詳細資料。
+        *   如果 `CustomerProfileService` 未直接公開，或者如果需要更受控制的外部 API，則這些端點允許外部系統 (例如客戶入口網站) 管理偏好設定。
+*   **內部 API：**
+    *   新的寄件者服務 (`SMSSenderService`、`AppPushService`) 將需要內部 API 或佇列接聽器來處理來自 `DispatchService` 的請求。
+    *   `DispatchService` 將需要內部 API 來查詢 `CustomerProfileService` 和 `TemplateManagementService`。
+
+本文件概述了擴展到多頻道電子通訊平台的方案。與 AFP 和電子郵件系統的整合意味著 `DispatchService` 可以選擇這些作為頻道，而各自的寄件者服務 (現有的 `EmailSenderService` 和新的服務) 將處理最終的交付。AFP 產生和轉換仍將如先前設計般進行，其輸出 (例如 AFP 轉換產生的 PDF) 將成為其中一個通訊頻道的附件或連結內容。

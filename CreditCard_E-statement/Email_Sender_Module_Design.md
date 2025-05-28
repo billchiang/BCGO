@@ -236,4 +236,243 @@ The goal is to send emails directly to recipient MX servers, but also support se
 
 This design document provides a comprehensive plan for the Email Sender Module. The choice of specific libraries and queue technologies will depend on the chosen programming language and existing infrastructure, but the principles outlined should guide development.The design document for the Email Sender Module has been successfully created. It covers the proposed microservice architecture, details for a custom SMTP client (including MX lookup, TLS, and authentication), queue management with retry and bounce handling strategies, status tracking, MIME message construction, and key deliverability/security best practices like SPF, DKIM, and DMARC.
 
-I will now submit the report for this subtask.
+---
+## 正體中文 (Traditional Chinese)
+
+# 電子郵件傳送模組 - 設計文件
+
+## 1. 建議架構
+
+*   **微服務設計：** 該模組將實作為名為 `EmailSenderService` 的獨立微服務。
+    *   **職責：**
+        *   接受電子郵件傳送請求。
+        *   將電子郵件排入佇列等待傳送。
+        *   透過自訂 SMTP 用戶端邏輯管理傳送程序。
+        *   處理重試和基本退信資訊。
+        *   提供狀態更新。
+        *   實作傳送能力最佳實務 (SPF、DKIM 簽署)。
+    *   **技術堆疊：** 可使用 Java、Python 或 .NET 實作，並為每種語言利用適當的函式庫。設計將盡可能與語言無關，並提供特定的函式庫建議。
+*   **接收電子郵件請求：**
+    *   **主要方法：API 端點：**
+        *   RESTful API (例如 `POST /send_email`) 將是提交電子郵件請求的主要方式。
+        *   **負載 (JSON)：**
+            ```json
+            {
+              "request_id": "unique_identifier_for_tracking", // 選用，如果未提供，可由服務產生
+              "from_address": "sender@example.com",
+              "reply_to_address": "reply-to@example.com", // 選用
+              "to_addresses": ["recipient1@example.net", "recipient2@example.org"],
+              "cc_addresses": ["cc1@example.net"], // 選用
+              "bcc_addresses": ["bcc1@example.net"], // 選用
+              "subject": "Your Subject Line",
+              "body_plain": "This is the plain text body.",
+              "body_html": "<h1>This is the HTML body</h1><p>With a <a href='http://example.com'>link</a>.</p>", // 選用
+              "attachments": [ // 選用
+                {
+                  "filename": "document.pdf",
+                  "content_type": "application/pdf",
+                  "data_base64": "BASE64_ENCODED_DATA_HERE" // 用於直接嵌入
+                },
+                {
+                  "filename": "report.docx",
+                  "download_url": "https://example.com/downloads/report.docx" // 用於連結
+                }
+              ],
+              "headers": { // 選用自訂標頭
+                "X-Custom-Header": "Value"
+              },
+              "priority": "normal" // 選用: "high", "normal", "low"
+            }
+            ```
+        *   **回應 (同步)：**
+            *   成功排入佇列：`202 Accepted` 並附帶 `message_id` (由服務產生用於追蹤)。
+            *   驗證錯誤：`400 Bad Request` 並附帶錯誤詳細資訊。
+            *   驗證/授權錯誤：`401 Unauthorized` 或 `403 Forbidden`。
+    *   **替代方法：訊息佇列 (例如 RabbitMQ、Kafka、AWS SQS、Azure Service Bus)：**
+        *   `EmailSenderService` 也可以直接從指定的佇列取用訊息。
+        *   訊息負載將與 API JSON 負載相同。
+        *   這適用於高輸送量情境或與偏好基於佇列通訊的其他後端系統整合。
+        *   佇列的選擇將取決於整體系統架構，但 RabbitMQ 是一個良好的通用起點。
+
+## 2. 自訂 SMTP 用戶端實作詳細資訊
+
+目標是直接將電子郵件傳送到收件人 MX 伺服器，但也支援在必要時透過預先設定的中繼伺服器傳送 (例如，針對特定網域或在初始推出/測試期間)。
+
+*   **核心 SMTP 通訊協定支援：**
+    *   實作標準 SMTP 指令：`HELO`/`EHLO`、`MAIL FROM`、`RCPT TO`、`DATA`、`QUIT`、`RSET`、`NOOP`。
+    *   剖析和處理 SMTP 伺服器回應 (狀態碼和訊息)。
+    *   支援伺服器公告的 ESMTP 擴充功能 (例如，如果可行，支援 `PIPELINING`、`8BITMIME`、`SMTPUTF8`)。
+*   **DNS MX 記錄查閱策略：**
+    *   對於給定的收件人電子郵件地址 (例如 `user@example.com`)：
+        1.  擷取網域部分 (`example.com`)。
+        2.  對該網域的 MX 記錄執行 DNS 查詢。
+        3.  依其優先順序值排列 MX 記錄 (值越低越優先)。
+        4.  依優先順序嘗試連線到 MX 伺服器。
+    *   **快取：** 實作 DNS 快取 (並適當處理 TTL)，以減少對經常目標網域的重複查閱。
+    *   **函式庫：**
+        *   Java：`javax.naming.directory.DirContext` (用於 JNDI DNS 查閱)，或像 `dnsjava` 這樣的函式庫。
+        *   Python：`dnspython`。
+        *   .NET：`System.Net.Dns` 或像 `DnsClient.NET` 這樣的第三方函式庫。
+*   **連線管理：**
+    *   **連線池 (未來增強功能)：** 對於向常用網域大量傳送，請考慮使用連線池以減少 SMTP 交握的額外負荷。最初，可以為每次嘗試建立連線。
+    *   **TLS/SSL：**
+        *   在標準 SMTP 連接埠 (25 或 587) 上優先使用 `STARTTLS`。
+        *   如果未提供 `STARTTLS` 或失敗，且已設定，則嘗試透過 SMTPS (直接在連接埠 465 上使用 SSL/TLS，儘管這對於伺服器對伺服器而言不太標準) 進行連線。
+        *   使用系統信任的 CA 憑證進行伺服器憑證驗證。如果絕對必要 (僅限開發/測試環境)，允許設定接受特定中繼伺服器的自我簽署憑證。
+    *   **逾時：** 實作可設定的連線、指令執行和資料傳輸逾時。
+*   **基本 SMTP 驗證：**
+    *   支援 `AUTH PLAIN` 和 `AUTH LOGIN` 機制。
+    *   這主要適用於服務可能設定為透過已驗證的中繼伺服器 (例如公司 SMTP 伺服器、SendGrid、AWS SES) 而非直接 MX 傳送來傳送的情境。
+    *   憑證將安全儲存並為每個中繼伺服器進行設定。
+*   **建議函式庫 (用於核心 SMTP 用戶端邏輯)：**
+    *   **Java：Jakarta Mail (前身為 JavaMail)**。它提供 `SMTPTransport`，可處理大部分 SMTP 通訊協定。對於 MX 查閱和直接傳送，自訂邏輯或 `dnsjava` 將對其進行補充。
+    *   **Python：`smtplib`** 用於 SMTP 用戶端操作。`dnspython` 用於 MX 查閱。對於進階退信處理 (伺服器端)，可以使用 `aiosmtpd` 建置自訂 SMTP 接聽器以處理 NDR (請參閱退信處理)。
+    *   **.NET：MailKit**。其 `SmtpClient` 功能強大，支援 `STARTTLS`、驗證和許多 ESMTP 擴充功能。它可用於直接傳送 (搭配自訂 MX 查閱邏輯) 或中繼。
+
+## 3. 佇列管理系統
+
+*   **永續性佇列技術的選擇：**
+    *   **RabbitMQ (建議)：**
+        *   **優點：** 成熟、功能豐富 (永續性訊息、無效信件交換、彈性路由)，對 Java、Python、.NET 提供良好的用戶端函式庫支援。支援對於可靠處理至關重要的訊息確認。
+        *   **缺點：** 需要單獨的伺服器設定和管理。
+    *   **Apache Kafka：**
+        *   **優點：** 極高的輸送量、耐用、適合串流。
+        *   **缺點：** 設定和管理比 RabbitMQ 複雜，如果尚未成為基礎架構的一部分，則可能過於龐大。
+    *   **資料庫支援的佇列 (例如使用 PostgreSQL、MySQL)：**
+        *   **優點：** 可以利用現有的資料庫基礎架構。對於非常基本的需求而言更簡單。
+        *   **缺點：** 對於高容量效率較低，需要仔細實作鎖定和輪詢，可能會對資料庫造成額外負載。不建議用於高效能電子郵件傳送器。
+    *   **初步建議：RabbitMQ**，因其在功能、可靠性和相對易用性方面的平衡。
+*   **詳細的重試機制：**
+    *   **佇列中的訊息結構：** 排入佇列的訊息應包含電子郵件資料和中繼資料，如 `attempt_count`、`last_attempt_time`、`original_enqueue_time`。
+    *   **暫時性錯誤 (例如 SMTP 4xx 代碼、連線逾時、DNS 查閱失敗)：**
+        *   遞增 `attempt_count`。
+        *   延遲後重新將訊息排入佇列。
+        *   **重試間隔：** 建議使用指數退避 (例如 1 分鐘、5 分鐘、15 分鐘、30 分鐘、1 小時，然後每隔幾小時)。
+        *   **最大重試次數：** 可設定 (例如 10-15 次嘗試或長達 24-48 小時)。
+        *   如果達到最大重試次數，則將訊息移至「失敗」或「無效信件」佇列，並記錄永久性失敗。
+    *   **永久性錯誤 (例如 SMTP 5xx 代碼 - 未知使用者、找不到網域、訊息遭原則拒絕)：**
+        *   立即記錄永久性失敗。
+        *   將訊息移至「失敗」佇列 (或 RabbitMQ 中的無效信件交換)。
+        *   此訊息不再對此特定收件人進行重試。
+*   **退信處理策略：**
+    *   **同步 SMTP 拒絕：**
+        *   這些是在 SMTP 工作階段 (`RCPT TO` 或 `DATA` 階段) 期間收到的即時 `5xx` (永久性) 或 `4xx` (暫時性) 回應。
+        *   由 SMTP 用戶端邏輯直接處理，如「重試機制」中所述。
+        *   狀態會立即在追蹤資料庫中更新。
+    *   **非同步未傳送回報 (NDR) / 退信：**
+        *   這些是在初始 SMTP 工作階段關閉後傳送回 `MAIL FROM` 地址 (或自訂 `Return-Path`) 的電子郵件。
+        *   **初步實作 (可行)：**
+            *   為 `Return-Path` 標頭設定專用信箱 (例如 `bounces@yourdomain.com`)。
+            *   定期由單獨的程序或 `EmailSenderService` 中的元件連線到此信箱 (透過 POP3 或 IMAP，使用 Jakarta Mail、MailKit 或 Python 的 `poplib`/`imaplib` 等函式庫)。
+            *   剖析這些 NDR 電子郵件。識別原始訊息和收件人可能具有挑戰性，但通常涉及剖析標準退信格式 (例如 DSN - 傳送狀態通知，RFC 3464) 或注入原始傳出電子郵件中的自訂標頭 (例如 `X-Message-ID`)。
+            *   在追蹤資料庫中更新原始電子郵件的狀態。
+        *   **未來增強功能 (更複雜)：**
+            *   **用於退信的自訂 SMTP 接聽器：** 部署輕量級 SMTP 伺服器 (例如使用 Python 的 `aiosmtpd` 或簡單的 Java SMTP 伺服器函式庫) 以直接接收 NDR。這樣可以避免輪詢信箱並允許即時處理。此接聽器將剖析傳入的 NDR 並更新資料庫。
+            *   **進階 NDR 剖析：** 使用專用函式庫或服務剖析各種 NDR 格式，因為它們在不同郵件伺服器之間可能不一致。
+            *   **回饋迴圈 (FBL) 處理：** 向主要 ISP (Gmail、Outlook.com、Yahoo) 註冊 FBL，以接收使用者將訊息標記為垃圾郵件的報告。這需要特定的電子郵件標頭和接收這些報告的端點。
+*   **優先順序設定與並行控制：**
+    *   **優先順序佇列：** RabbitMQ 支援訊息優先順序。`EmailSenderService` 可以為高、中、低優先順序的電子郵件使用不同的佇列，或使用具有訊息優先順序屬性的單一佇列。
+    *   **並行控制：**
+        *   **每個服務執行個體：** 限制單一 `EmailSenderService` 執行個體可以建立的並行 SMTP 連線數 (例如使用號誌或固定大小的執行緒池)。
+        *   **每個目標網域 (未來增強功能)：** 實作邏輯以限制對特定收件人網域的並行連線和傳送速率，以避免被標記為垃圾郵件 (例如，對 `example.com` 不超過 X 個連線或 Y 則訊息/分鐘)。如果使用多個寄件者執行個體，則需要分散式狀態。
+
+## 4. 狀態追蹤與記錄
+
+*   **資料庫結構描述 (概念性 - 例如 PostgreSQL/MySQL)：**
+    *   `emails` 資料表：
+        *   `id`：BIGSERIAL，主鍵
+        *   `message_id`：VARCHAR(255)，唯一，已索引 (由服務產生或來自請求)
+        *   `request_id`：VARCHAR(255)，已索引 (來自初始 API 請求，選用)
+        *   `from_address`：VARCHAR(255)
+        *   `subject`：TEXT
+        *   `status`：VARCHAR(50) (例如 "queued"、"sending"、"sent"、"failed_temporary"、"failed_permanent"、"delivered_fbl_spam")
+        *   `retry_count`：INTEGER，預設為 0
+        *   `last_attempt_time`：TIMESTAMP
+        *   `queued_time`：TIMESTAMP，預設為 CURRENT_TIMESTAMP
+        *   `sent_time`：TIMESTAMP，可為 Null
+        *   `error_message`：TEXT，可為 Null (遇到的最後一個錯誤)
+        *   `priority`：VARCHAR(20)，預設為 'normal'
+    *   `email_recipients` 資料表：
+        *   `id`：BIGSERIAL，主鍵
+        *   `email_id`：BIGINT，外鍵至 `emails.id`
+        *   `recipient_address`：VARCHAR(255)
+        *   `recipient_type`：VARCHAR(10) ('to'、'cc'、'bcc')
+        *   `status`：VARCHAR(50) (例如 "queued"、"sending"、"sent"、"failed_temporary"、"failed_permanent"、"bounced")
+        *   `smtp_response_code`：INTEGER，可為 Null
+        *   `smtp_response_message`：TEXT，可為 Null
+        *   `last_update_time`：TIMESTAMP
+    *   `email_recipients` 中 `recipient_address` 和 `status` 的索引對於查詢很有用。
+*   **記錄詳細資訊：**
+    *   **全面記錄：** 使用結構化記錄格式 (例如 JSON) 記錄所有重要事件。
+    *   **要記錄的事件：**
+        *   收到電子郵件請求 (包含關鍵參數，不直接包含 Base64 內容等敏感資料)。
+        *   電子郵件已排入佇列 (包含 `message_id`)。
+        *   嘗試傳送 (包含 `message_id`、收件人、MX 伺服器)。
+        *   SMTP 指令和回應 (可能很冗長，可透過偵錯旗標啟用)。
+        *   成功傳送給收件人。
+        *   暫時性失敗 (包含錯誤、`retry_count`)。
+        *   永久性失敗 (包含錯誤)。
+        *   訊息已移至無效信件佇列。
+        *   收到並處理退信。
+        *   DKIM 簽署成功/失敗。
+    *   **記錄層級：** 使用適當的記錄層級 (INFO、WARN、ERROR、DEBUG)。
+    *   **工具：** 標準記錄函式庫 (Java 的 Log4j2/SLF4j、Python 的 `logging` 模組、.NET 的 Serilog/NLog)。
+*   **用於狀態查詢的 API：**
+    *   `GET /status/{message_id}`：傳回電子郵件的整體狀態以及每個收件人的狀態。
+    *   `GET /status?recipient_email={email_address}`：(更進階) 傳回傳送給特定收件人的電子郵件狀態。
+    *   回應應包含狀態、時間戳記和任何錯誤訊息。
+
+## 5. 電子郵件內容與附件
+
+*   **MIME 訊息建構：**
+    *   支援 `multipart/alternative` 以傳送電子郵件的純文字和 HTML 版本。接收用戶端將選擇要顯示的版本。
+    *   包含附件時支援 `multipart/mixed`。
+    *   為所有 MIME 部分正確設定 `Content-Type` 標頭。
+    *   正確處理字元編碼 (所有文字部分建議使用 UTF-8)。
+*   **下載連結的處理：**
+    *   如果附件使用 `download_url` 指定，則服務不會嵌入資料。
+    *   相反，URL 將作為超連結插入電子郵件內文 (純文字和/或 HTML) 中。
+    *   這對於非常大的檔案或追蹤下載很有用。
+*   **MIME 建構函式庫：**
+    *   **Java：Jakarta Mail (MimeMessage、MimeBodyPart、MimeMultipart)。**
+    *   **Python：`email.mime` 套件** (`MIMEMultipart`、`MIMEText`、`MIMEApplication`、`MIMEImage`)。
+    *   **.NET：MimeKit** (隨附於 MailKit)。它具有全面的 MIME 建立功能 (`MimeMessage`、`TextPart`、`MimePart`、`Multipart`)。
+
+## 6. 傳送能力與安全性最佳實務
+
+*   **SPF (寄件者策略架構)：**
+    *   **實作：** 這主要是一個 DNS 設定。需要為傳送網域 ( `MAIL FROM` / `Return-Path` 地址中的網域) 建立 TXT 記錄。
+    *   **內容：** SPF 記錄將列出授權為該網域傳送電子郵件的 `EmailSenderService` 執行個體的 IP 位址或主機名稱。
+    *   **職責：** 雖然服務本身不「實作」SPF，但服務的部署和營運程序必須包含有關設定正確 SPF 記錄的指南。
+*   **DKIM (網域名稱金鑰識別郵件) 簽署：**
+    *   **實作：**
+        1.  **金鑰產生：** 為 DKIM 簽署產生公開/私密金鑰對。
+        2.  **DNS 設定：** 在 DNS 中將公開金鑰發佈為特定選擇器 (例如 `selector1._domainkey.yourdomain.com`) 的 TXT 記錄。
+        3.  **簽署程序：** 在傳送電子郵件之前，`EmailSenderService` 將：
+            *   建構電子郵件訊息 (標頭和內文)。
+            *   根據 DKIM 規格對標頭和內文進行規範化。
+            *   使用私密金鑰產生規範化內容的加密簽章。
+            *   在電子郵件中新增 `DKIM-Signature` 標頭，包括簽章、網域、選擇器和其他參數。
+    *   **函式庫：**
+        *   Java：像 `java-dkim` 這樣的函式庫或基於 BouncyCastle 建置。Jakarta Mail 本身不直接支援 DKIM 簽署，但可用於新增標頭。
+        *   Python：`dkimpy`。
+        *   .NET：MailKit/MimeKit 提供 DKIM 簽署功能。
+*   **DMARC (基於網域的訊息驗證、報告和一致性)：**
+    *   **實作：** 這也是一個 DNS 設定。在 `_dmarc.yourdomain.com` 建立 TXT 記錄。
+    *   **內容：** DMARC 記錄告知接收伺服器如果 SPF 和/或 DKIM 檢查失敗該怎麼做 (例如 `p=none`、`p=quarantine`、`p=reject`)。它還指定接收彙總 (`rua`) 和鑑識 (`ruf`) 報告的地址。
+    *   **職責：** 營運程序。服務應啟用 SPF 和 DKIM 以使 DMARC 生效。處理 DMARC 報告是監控傳送能力的單獨營運任務。
+*   **速率限制：**
+    *   **內部限制：**
+        *   限制每個 `EmailSenderService` 執行個體的並行連線數。
+        *   限制每個執行個體每單位時間從佇列處理的訊息數。
+    *   **每個網域限制 (未來增強功能)：** 追蹤對主要收件人網域 (Gmail、Outlook、Yahoo) 的傳送速率，如果超過內部閾值，則限制傳送以避免被暫時封鎖。如果使用多個寄件者執行個體，這很複雜且需要分散式狀態。
+*   **IP 信譽管理：**
+    *   **專用 IP 位址：** 對於大量傳送，請使用專用 IP 位址。
+    *   **IP 預熱：** 在幾天/幾週內逐步增加新 IP 位址的傳送量。
+    *   **監控黑名單：** 定期檢查傳送 IP 是否列在主要 DNS 黑名單 (DNSBL) 上。
+    *   **處理垃圾郵件投訴：** 及時處理回饋迴圈 (FBL) 和取消訂閱請求。
+    *   **乾淨的郵寄清單：** 確保收件人已選擇加入。未知使用者的高退信率會損害 IP 信譽。
+    *   **內容品質：** 避免垃圾郵件內容。
+    *   **反向 DNS (PTR 記錄)：** 確保傳送 IP 位址具有與傳送網域或相關子網域相符的有效 PTR 記錄。
+
+此設計文件為電子郵件傳送模組提供了全面的計畫。特定函式庫和佇列技術的選擇將取決於所選的程式語言和現有的基礎架構，但概述的原則應指導開發。

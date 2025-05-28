@@ -91,3 +91,100 @@ This will execute tests like `AfpConversionServiceTest`, which uses a temporary 
 
 ---
 **Note:** `run_conversion_tool.sh.example` is a **dummy script**. It does not perform real AFP conversion but simulates the process by creating a placeholder output file. For actual AFP conversion, this script would need to be replaced with calls to a real conversion engine.
+
+---
+## 正體中文 (Traditional Chinese)
+
+# AFP 轉換模組
+
+## 目的
+
+本模組負責將高級功能演示 (AFP) 文件轉換為其他格式，主要包括：
+
+*   PDF (可攜式文件格式)
+*   PDF/A (用於存檔的 PDF)
+*   PCL (印表機命令語言)
+*   PostScript (PS)
+
+該模組設計為微服務或大型文件處理系統中的一個元件。
+
+## 核心轉換技術
+
+**本模組本身不實作低階 AFP 轉換邏輯。** 相反，它設計用於整合和包裝專門的第三方轉換工具。此工具可以是商業產品，或者如果找到符合所需保真度和 MO:DCA IS/3 功能支援的合適開源函式庫/工具。
+
+底層轉換工具的選擇至關重要，應根據 AFP 功能支援（例如，字型、疊加、IOCA 影像、FS45 色彩）和目標格式保真度的特定要求（如主要 `AFP_Conversion_Module_Design.md` 文件所述）進行。
+
+## 一般整合方法
+
+與所選轉換工具的整合可以透過以下方法之一實現：
+
+1.  **命令列介面 (CLI) 包裝：**
+    *   服務將建構並執行對外部轉換工具的命令列呼叫。
+    *   服務將拾取工具產生的輸出檔案。
+    *   錯誤處理將涉及解析工具的結束代碼和標準錯誤/輸出流。
+    *   `scripts/run_conversion_tool.sh.example` 指令碼說明了這種方法。`AfpConversionService.java` 設定為呼叫此指令碼進行 PDF 轉換。
+
+2.  **軟體開發套件 (SDK) 使用：**
+    *   如果所選轉換工具提供 Java SDK（或者如果模組以不同語言實作，則提供其他語言的 SDK），服務將使用此 SDK 執行轉換。
+    *   這種方法通常比 CLI 包裝更健全，並提供更好的控制和錯誤處理。
+
+## 主要組態點
+
+該模組的運作需要組態，通常透過 `application.properties` 檔案或環境變數進行管理。主要組態項目包括：
+
+*   **轉換工具路徑：**
+    *   `afp.conversion.tool.executable.path`：轉換工具可執行檔的絕對路徑（如果使用 CLI）。`AfpConversionService.java` 中的目前範例使用相對路徑 `scripts/run_conversion_tool.sh.example`。
+*   **授權資訊（如果適用於商業工具）。**
+*   **AFP 資源目錄（字型路徑、疊加路徑等）。**
+*   **暫存檔案儲存。**
+
+有關更多詳細資訊，請參閱 `src/main/java/com/example/afpconversion/config/application.properties.example`。
+
+## 執行示範
+
+`AfpConversionService.java` 類別包含一個 `main` 方法，該方法示範使用虛設的 `scripts/run_conversion_tool.sh.example` 指令碼進行 AFP 到 PDF 的轉換。
+
+**先決條件：**
+1.  確保指令碼 `scripts/run_conversion_tool.sh.example` 是可執行的：
+    ```bash
+    chmod +x scripts/run_conversion_tool.sh.example
+    ```
+2.  `AfpConversionService.java` 中的 `main` 方法需要一個輸入 AFP 檔案。如果找不到輸入檔案，它會嘗試在 `AFP_Conversion_Module_Design` 專案根目錄的相對路徑 `../AFPGenerationModule/output/statement.afp` 建立一個虛設的輸入檔案。為了進行更真實的測試，您可以將實際（或產生的）AFP 檔案放在該處。
+
+**執行步驟：**
+
+1.  **編譯模組（如果尚未完成）：**
+    雖然 `AfpConversionService` 的核心 ProcessBuilder 邏輯沒有外部 Maven 相依性，但如果它是大型 Spring Boot 應用程式的一部分（如 `@Service` 所示），您將使用 Maven 建置它：
+    ```bash
+    # cd CreditCard_E-statement/AFP_Conversion_Module_Design/
+    # mvn clean package
+    # (如果 main 方法沒有使用外部函式庫，則從 IDE 直接執行 main 方法不一定需要此步驟)
+    ```
+
+2.  **執行 `AfpConversionService.java` 中的 `main` 方法：**
+    *   **從 IDE：** 右鍵按一下 `AfpConversionService.java` 並選取「執行 'AfpConversionService.main()'」。
+    *   **從命令列（使用 Maven 編譯後，假設您已建置 JAR - 這由於 slf4j 等相依性預設未被著色而更複雜）：**
+        對於這個特定的非 Spring main 方法，一個更簡單的方法（不使用完整的 Maven 組件）：
+        ```bash
+        # 確保您位於 'CreditCard_E-statement/AFP_Conversion_Module_Design' 目錄中
+        # 編譯 Java 檔案（如果此簡單 main 執行未使用 pom.xml）
+        # mkdir -p target/classes
+        # javac -d target/classes -cp "src/main/java" src/main/java/com/example/afpconversion/model/*.java src/main/java/com/example/afpconversion/*.java
+
+        # 執行 main 方法
+        # java -cp "target/classes" com.example.afpconversion.AfpConversionService
+        ```
+        為簡單起見，建議從 IDE 執行此示範。`main` 方法將列印轉換的結果。
+
+    輸出 PDF 將建立在 `AFP_Conversion_Module_Design/output/` 目錄中（例如，`output/statement.pdf`）。
+
+## 單元測試
+可以使用 Maven 執行單元測試：
+```bash
+# cd CreditCard_E-statement/AFP_Conversion_Module_Design/
+mvn test
+```
+這將執行類似 `AfpConversionServiceTest` 的測試，該測試使用暫存目錄來存放測試檔案並驗證指令碼執行邏輯。
+
+---
+**注意：** `run_conversion_tool.sh.example` 是一個 **虛設指令碼**。它不執行實際的 AFP 轉換，而是透過建立預留位置輸出檔案來模擬該過程。對於實際的 AFP 轉換，此指令碼需要替換為對實際轉換引擎的呼叫。
